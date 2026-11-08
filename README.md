@@ -10,7 +10,7 @@ Run the notebooks in order from the repository root.
 |---|---|---|---|
 | `01_Merge_and_screening.ipynb` | 3.1, 3.2, Fig. A1 | Merges the two exports, removes duplicates, records without abstract and retracted publications, and applies the screening criteria E1-E3 | `data/articles/screened_articles.csv` (1,600 records), `screening_log.csv`, `figures/Fig_A1_PRISMA_2020.*` |
 | `02_Classification.ipynb` | 3.3 | Classifies the screened abstracts with the LLM: pilot of 50 records, then all 1,600 | `data/articles/llm_classification/pilot/`, `.../full/classification_full.csv` |
-| `03_Classification_analysis.ipynb` | 3.3, 4.1 | Figures and tables of the classification (Figs. 1-4, Tables 3-4) | `tables/`, `figures/` |
+| `03_Classification_analysis.ipynb` | 3.3, 4.1 | Figures and tables of the classification (Figs. 1-4, Tables 3-4); Table 4 shows the two most cited and two most recent articles per keyword, and `tables/Table_4_candidates.csv` lists all filtered articles (supplementary material) | `tables/`, `figures/` |
 
 Flow (collections of 05/11/2026 and 06/11/2026): 4,174 records identified (Scopus 2,475; WoS 1,699) → 1,070 duplicates → 3,104 unique → 8 without abstract and 1 retracted removed → 3,095 screened → 1,495 excluded (E1 = 1,285; E2 = 196; E3 = 14) → **1,600 records classified**.
 
@@ -56,7 +56,7 @@ tests/                       checks of the screening rules, the prompt, the pars
 ## Running
 
 1. `pip install -r requirements.txt`
-2. Only for `02_Classification.ipynb`: create a file named `.env` in this folder with one line, `LLM_API_KEY=your-key` (see `.env.example`; the file is ignored by git). The provider and the model are set in the first cell of the notebook. Batches already saved are kept, so an interrupted run continues from the next batch; batches from another provider or model are never mixed in.
+2. Only for `02_Classification.ipynb`: create a file named `.env` in this folder with one line, `LLM_API_KEY=your-key` (the file is ignored by git). The provider and the model are set in the first cell of the notebook. Batches already saved are kept, so an interrupted run continues from the next batch; batches from another provider or model are never mixed in.
 3. Human check of the pilot: code the 50 records of `pilot/pilot_human_coding.csv` blind and run section 2 of `02_Classification.ipynb` (percent agreement and Cohen's kappa).
 4. `01` and `03` do not call any API and reproduce the data files, tables and figures from the files above.
 
