@@ -1,0 +1,6 @@
+pandas>=2.0
+numpy
+matplotlib>=3.7
+wordcloud>=1.9
+requests
+jupyter

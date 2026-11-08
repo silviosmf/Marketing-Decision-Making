@@ -1,0 +1,10 @@
+step,records,note
+Scopus records exported,2475,
+WoS records exported,1699,
+Records identified (Scopus + WoS),4174,
+After DOI rule,3131,1043 duplicates
+After title + year (+-1) + first-author rule,3104,1070 duplicates removed in total; 1057 records in both databases
+Unique records,3104,in both databases: 1057
+Removed: without abstract,8,
+Removed: retracted publication,1,
+Records for screening,3095,

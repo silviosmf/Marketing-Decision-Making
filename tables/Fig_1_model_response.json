@@ -1,0 +1,14 @@
+{
+  "evidence": "The first interactive tool, a recommendation agent (RA), allows consumers to more efficiently screen the (potentially very large) set of alternatives",
+  "ai_techniques": [
+    "recommendation agent",
+    "comparison matrix"
+  ],
+  "rationale": "Interactive decision aids are deployed in the purchase process to screen alternatives and compare options, which is support for marketing action in the product/consumer domain. The purpose is personalized recommendation/assistance based on consumer preferences, aligning with thinking AI for personalization (rule R3).",
+  "stage": "Marketing action",
+  "ai_intelligence": "Thinking AI",
+  "marketing_mix": "Product/Consumer",
+  "secondary_stage": null,
+  "secondary_ai_intelligence": null,
+  "confidence": "high"
+}
