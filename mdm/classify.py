@@ -20,18 +20,15 @@ from mdm.llm_client import LLMClient, LLMError, QuotaExceeded, load_api_key
 INPUT_FILE = 'data/articles/screened_articles.csv'
 EXAMPLES_FILE = 'data/framework/few_shot_prompt.csv'
 OUTPUT_DIR = 'data/articles/llm_classification'
-PILOT_SIZE, PILOT_SEED = 50, 2026
 AUDIT_FIELDS = ['run', 'batch', 'provider', 'model', 'model_version', 'temperature', 'reasoning_effort',
                 'prompt_version', 'prompt_hash', 'batch_size_sent', 'classified_at']
 
 
-def load_records(input_file=INPUT_FILE, run='full'):
+def load_records(input_file=INPUT_FILE):
+    """All records retained by the screening (input of the classification)."""
     if not os.path.exists(input_file):
         raise FileNotFoundError(f'{input_file} not found: run 01_Merge_and_screening.ipynb first.')
-    df = pd.read_csv(input_file, dtype=str, keep_default_na=False)
-    if run == 'pilot':
-        df = df.sample(n=min(PILOT_SIZE, len(df)), random_state=PILOT_SEED)
-    return df.reset_index(drop=True)
+    return pd.read_csv(input_file, dtype=str, keep_default_na=False).reset_index(drop=True)
 
 
 def system_prompt(examples_file=EXAMPLES_FILE):
@@ -82,16 +79,6 @@ def classify_rows(client, system, rows, log, depth=0):
     return got
 
 
-def export_human_sheet(df, path):
-    """Blind sheet for the authors to code the pilot sample (no model answers)."""
-    if os.path.exists(path):
-        return
-    sheet = df[['ID', 'Title', 'Keywords', 'Abstract']].copy()
-    for c in ['stage_human', 'ai_intelligence_human', 'marketing_mix_human', 'notes_human']:
-        sheet[c] = ''
-    sheet.to_csv(path, index=False, encoding='utf-8-sig')
-
-
 def consolidate(out_dir, run):
     files = sorted(f for f in os.listdir(out_dir) if f.startswith('batch_') and f.endswith('.csv'))
     if not files:
@@ -116,13 +103,11 @@ def check_same_source(out_dir, provider, model):
 
 def run(run, provider, model, batch_size, temperature=0.0, min_interval=7.0, max_output_tokens=32768,
         thinking_budget=None, reasoning_effort=None, input_file=INPUT_FILE, output_dir=OUTPUT_DIR):
-    """Classify the pilot sample (run='pilot') or all screened records (run='full')."""
-    df = load_records(input_file, run)
+    """Classify all screened records; `run` names the output folder (the final classification is run='full')."""
+    df = load_records(input_file)
     out_dir = os.path.join(output_dir, run)
     check_same_source(out_dir, provider, model)
     os.makedirs(os.path.join(out_dir, 'raw'), exist_ok=True)
-    if run == 'pilot':
-        export_human_sheet(df, os.path.join(out_dir, 'pilot_human_coding.csv'))
     system, phash = system_prompt()
     size = batch_size
     client = LLMClient(provider, model, load_api_key(), temperature=temperature, min_interval=min_interval,
@@ -178,39 +163,10 @@ def summary(df, run):
     print(df['confidence'].value_counts().to_string())
 
 
-def _kappa(a, b):
-    a, b = pd.Series(a).reset_index(drop=True), pd.Series(b).reset_index(drop=True)
-    labels = sorted(set(a) | set(b))
-    n = len(a)
-    po = (a == b).mean()
-    pe = sum((a == l).mean() * (b == l).mean() for l in labels)
-    return po, (po - pe) / (1 - pe) if pe < 1 else 1.0
-
-
-def agreement(model_file, human_file):
-    """Percent agreement and Cohen's kappa between the model and the authors' coding of the pilot."""
-    m = pd.read_csv(model_file, dtype=str, keep_default_na=False)
-    h = pd.read_csv(human_file, dtype=str, keep_default_na=False)
-    h = h[h['stage_human'].str.strip() != '']
-    d = m.merge(h[['ID', 'stage_human', 'ai_intelligence_human', 'marketing_mix_human']], on='ID')
-    if d.empty:
-        print('The human coding sheet is still empty.')
-        return None
-    norm = lambda s: s.str.strip().str.lower()
-    rows = []
-    for name, mc, hc in [('Stage', 'stage', 'stage_human'), ('AI intelligence', 'ai_intelligence', 'ai_intelligence_human')]:
-        po, k = _kappa(norm(d[mc]), norm(d[hc]))
-        rows.append({'dimension': name, 'n': len(d), 'agreement': round(po, 3), 'cohen_kappa': round(k, 3)})
-    cell_m = norm(d['stage']) + '|' + norm(d['ai_intelligence'])
-    cell_h = norm(d['stage_human']) + '|' + norm(d['ai_intelligence_human'])
-    po, k = _kappa(cell_m, cell_h)
-    rows.append({'dimension': 'Strategic element (stage x intelligence)', 'n': len(d), 'agreement': round(po, 3),
-                 'cohen_kappa': round(k, 3)})
-    return pd.DataFrame(rows)
-
-
 def status(output_dir=OUTPUT_DIR):
-    for r in ['pilot', 'full']:
+    """Batches and records saved in each run folder."""
+    runs = sorted(r for r in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, r))) if os.path.isdir(output_dir) else []
+    for r in runs:
         d = os.path.join(output_dir, r)
         n = len([f for f in os.listdir(d) if f.startswith('batch_') and f.endswith('.csv')]) if os.path.isdir(d) else 0
         df = consolidate(d, r) if n else None
