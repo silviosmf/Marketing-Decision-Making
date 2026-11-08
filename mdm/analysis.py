@@ -162,6 +162,12 @@ def table_keywords(df, k=3):
     return pd.DataFrame(rows), denom
 
 
+def _is_initials(tok):
+    """True for Scopus initials such as 'J.', 'J.-P.', 'D.-A.' or 'Ș.-A.' (any alphabet)."""
+    t = tok.strip()
+    return bool(t) and any(ch.isalpha() for ch in t) and all(ch.isupper() or ch in '.-' for ch in t) and len(t) <= 8
+
+
 def citation(authors, year):
     """'Surname (Year)', 'Surname and Surname (Year)' or 'Surname et al. (Year)' from Scopus or WoS author lists."""
     names = [a.strip() for a in str(authors).split(';') if a.strip()]
@@ -169,7 +175,7 @@ def citation(authors, year):
         if ',' in a:                                     # WoS: "Surname, I"
             return a.split(',')[0].strip()
         toks = a.split()                                 # Scopus: "Surname I.J."
-        while len(toks) > 1 and re.fullmatch(r'([A-Z]\.?-?)+', toks[-1]):
+        while len(toks) > 1 and _is_initials(toks[-1]):
             toks.pop()
         return ' '.join(toks)
     s = [surname(a) for a in names]
@@ -183,9 +189,21 @@ def citation(authors, year):
     return f'{s[0]} et al. ({y})'
 
 
-def table_selected(df, keywords, n=10):
-    """Table 4 candidates: for each intelligence and keyword of Table 3, up to the n most cited and the n most recent
-    articles (most recent: latest year, then most cited). Returns (detail, compact)."""
+def _disambiguate(detail):
+    """Harvard style: different works with the same citation get a, b, ... after the year (ordered by title)."""
+    first = detail.drop_duplicates('ID')
+    for cit, g in first.groupby('Citation'):
+        if g['ID'].nunique() > 1:
+            for letter, (_, a) in zip('abcdefgh', g.sort_values('Title').iterrows()):
+                detail.loc[detail['ID'] == a['ID'], 'Citation'] = cit[:-1] + letter + ')'
+    return detail
+
+
+def table_selected(df, keywords, n=10, n_table=2):
+    """Table 4. Candidates: for each intelligence and keyword of Table 3, up to the n most cited and the n most recent
+    articles (most recent: latest year, then most cited); they are the supplementary list. Table 4 shows, for each
+    keyword, the n_table most cited and the n_table most recent candidates, without repeating an article already
+    shown for the same intelligence. Returns (candidates, table)."""
     rows = []
     for _, r in keywords.iterrows():
         sub = df[(df['ai_intelligence'] == r['AI intelligence']) & articles_with(df, r['keyword_key'])]
@@ -197,14 +215,22 @@ def table_selected(df, keywords, n=10):
                          'Citation': citation(a['Authors'], a['Year']), 'Title': a['Title'], 'Year': a['Year'],
                          'Cited': a['Cited'], 'DOI': a['DOI'], 'Journal': a.get('Journal', ''),
                          'Stage': a['stage'], 'Strategic element': a['strategic_element'], 'ID': a['ID']})
-    detail = pd.DataFrame(rows)
-    compact = (detail.sort_values(['Cited'], ascending=False)
-               .groupby(['AI intelligence', 'Keyword'], sort=False)['Citation']
-               .agg(lambda s: ', '.join(s)).reset_index().rename(columns={'Citation': 'Articles'}))
-    order = {(r['AI intelligence'], r['Keyword']): i for i, r in keywords.iterrows()}
-    compact = compact.sort_values(by=['AI intelligence', 'Keyword'], key=lambda c: c.map(lambda v: 0)).copy()
-    compact['_o'] = [order[(a, k)] for a, k in zip(compact['AI intelligence'], compact['Keyword'])]
-    return detail, compact.sort_values('_o').drop(columns='_o').reset_index(drop=True)
+    detail = _disambiguate(pd.DataFrame(rows))
+    detail['In Table 4'] = ''
+    shown = {i: set() for i in INTEL}
+    table = []
+    for _, r in keywords.iterrows():
+        intel, kw = r['AI intelligence'], r['Keyword']
+        g = detail[(detail['AI intelligence'] == intel) & (detail['Keyword'] == kw)]
+        picked = []
+        for crit, order in [('most cited', ['Cited', 'Year']), ('most recent', ['Year', 'Cited'])]:
+            pool = g[g['Selected as'].str.contains(crit) & ~g['ID'].isin(shown[intel])]
+            for _, a in pool.sort_values(order, ascending=[False, False]).head(n_table).iterrows():
+                shown[intel].add(a['ID'])
+                picked.append(a['Citation'])
+                detail.loc[(detail['ID'] == a['ID']) & (detail['Keyword'] == kw), 'In Table 4'] = crit
+        table.append({'AI intelligence': intel, 'Keyword': kw, 'Articles': ', '.join(picked)})
+    return detail, pd.DataFrame(table)
 
 
 def table_annual(df):
@@ -255,33 +281,31 @@ def example_record(df):
 
 
 # ---------------------------------------------------------------- figures
-def fig_wordclouds(df, max_words=60):
-    """Fig. 2: keyword clouds of the three intelligences (gray tones; size = number of articles)."""
-    from wordcloud import WordCloud
+def fig_keyword_tree(t3):
+    """Fig. 2: each AI intelligence (strategic decision) linked to its Table 3 keywords, in the layout of the paper."""
+    from matplotlib.patches import FancyBboxPatch, Rectangle
     style.use()
-    fig, axes = plt.subplots(1, 3, figsize=(11, 3.6))
-    gray = lambda *a, **k: 'rgb(40, 40, 40)'
-    for ax, intel in zip(axes, INTEL):
-        f = keyword_frequencies(df, intel)
-        f = f[f['articles'] > 1]
-        wc = WordCloud(width=900, height=700, background_color='white', color_func=gray, max_words=max_words,
-                       prefer_horizontal=1.0, font_path=_font(), random_state=2026, relative_scaling=0.6)
-        wc.generate_from_frequencies(dict(zip(f['keyword'], f['articles'])))
-        ax.imshow(wc, interpolation='bilinear')
-        ax.set_title(intel, fontsize=10)
-        ax.axis('off')
-    fig.tight_layout()
+    fig, ax = plt.subplots(figsize=(6.5, 2.9))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 44)
+    ax.axis('off')
+    box = dict(boxstyle='round,pad=0.4,rounding_size=0.8', facecolor='#eeeeee', edgecolor='#555555', linewidth=0.7)
+    for y0, h, title in [(33, 10, 'AI intelligence (strategic decision)'), (1, 30, 'Keywords')]:
+        ax.add_patch(Rectangle((1, y0), 98, h, fill=False, edgecolor='#999999', linewidth=0.7))
+        ax.text(98, y0 + h - 1.2, title, ha='right', va='top', fontsize=7.5, fontweight='bold', color='#333333')
+    for i, intel in enumerate(INTEL):
+        x = 4 + 32 * i                                     # left edge of the column
+        ax.add_patch(FancyBboxPatch((x, 35.5), 15, 3.6, **box))
+        ax.text(x + 7.5, 37.3, intel, ha='center', va='center', fontsize=8)
+        kws = t3.loc[t3['AI intelligence'] == intel, 'Keyword'].tolist()
+        ys = [24 - 8.5 * j for j in range(len(kws))]
+        ax.plot([x + 3, x + 3], [35.1, ys[-1]], color='#555555', linewidth=0.7)
+        for k, y in zip(kws, ys):
+            ax.plot([x + 3, x + 7], [y, y], color='#555555', linewidth=0.7)
+            ax.add_patch(FancyBboxPatch((x + 7.4, y - 1.9), 21, 3.8, **box))
+            ax.text(x + 17.9, y, k, ha='center', va='center', fontsize=8)
+    fig.tight_layout(pad=0.2)
     return fig
-
-
-def _font():
-    from matplotlib import font_manager
-    for name in ['Arial', 'Helvetica', 'Liberation Sans', 'DejaVu Sans']:
-        try:
-            return font_manager.findfont(name, fallback_to_default=False)
-        except ValueError:
-            continue
-    return None
 
 
 def fig_classification(df):
